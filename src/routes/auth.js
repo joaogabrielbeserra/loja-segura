@@ -5,7 +5,7 @@ const { db, transacao } = require('../db');
 const { schemas, problemaNaSenha } = require('../lib/validacao');
 const { HttpError } = require('../lib/http-error');
 const {
-  hashSenha, verificarSenha, hashFicticioPronto, cifrar, decifrar, indiceCego, sha256, tokenAleatorio,
+  hashSenha, verificarSenha, cifrar, decifrar, indiceCego, sha256, tokenAleatorio,
 } = require('../lib/crypto');
 const { mascararCpf, mascararTelefone } = require('../lib/mascaras');
 const { auditar } = require('../lib/auditoria');
@@ -15,7 +15,7 @@ const { emitirCsrf } = require('../middleware/csrf');
 const { limiteLogin, limiteCadastro, limiteRecuperacao } = require('../middleware/limites');
 
 const router = express.Router();
-const FALHA_LOGIN = 'E-mail ou senha inválidos.';
+const { autenticarUsuario } = require('../lib/autenticacao');
 
 function usuarioPublico(u) {
   return {
@@ -52,41 +52,9 @@ router.post('/cadastro', limiteCadastro, async (req, res) => {
 
 router.post('/login', limiteLogin, async (req, res) => {
   const { email, senha } = schemas.login.parse(req.body);
-  const usuario = (await db.user.findFirst({ where: { email: email } }));
-  const agora = Date.now();
-
-  if (!usuario) {
-    await verificarSenha(senha, await hashFicticioPronto()); // mesmo tempo de resposta
-    await auditar('LOGIN_FALHA', { req, detalhe: 'usuario_inexistente' });
-    throw new HttpError(401, FALHA_LOGIN);
-  }
-
-  if (usuario.locked_until && usuario.locked_until > agora) {
-    await verificarSenha(senha, await hashFicticioPronto());
-    await auditar('LOGIN_BLOQUEADO', { userId: usuario.id, req });
-    throw new HttpError(401, FALHA_LOGIN);
-  }
-
-  if (!(await verificarSenha(senha, usuario.password_hash))) {
-    const tentativas = usuario.failed_attempts + 1;
-    if (tentativas >= config.lockout.maxTentativas) {
-      (await db.user.updateMany({ data: { failed_attempts: 0, locked_until: agora + config.lockout.bloqueioMs }, where: { id: usuario.id } }));
-      await auditar('CONTA_BLOQUEADA', { userId: usuario.id, req, detalhe: `${tentativas} tentativas` });
-      await enviarEmail(usuario.email, 'Sua conta foi bloqueada temporariamente',
-        `Detectamos ${tentativas} tentativas de login com senha errada na sua conta.\n` +
-        'Por segurança, o acesso ficará bloqueado por 15 minutos.\n' +
-        'Se não foi você, recomendamos redefinir sua senha.');
-    } else {
-      (await db.user.updateMany({ data: { failed_attempts: tentativas }, where: { id: usuario.id } }));
-      await auditar('LOGIN_FALHA', { userId: usuario.id, req, detalhe: `tentativa ${tentativas}` });
-    }
-    throw new HttpError(401, FALHA_LOGIN);
-  }
-
-  (await db.user.updateMany({ data: { failed_attempts: 0, locked_until: null }, where: { id: usuario.id } }));
+  const usuario = await autenticarUsuario(email, senha, req);
   emitirSessao(res, usuario);
   emitirCsrf(res); // rotação do token CSRF a cada login
-  await auditar('LOGIN_OK', { userId: usuario.id, req });
   res.json({ usuario: usuarioPublico(usuario) });
 });
 

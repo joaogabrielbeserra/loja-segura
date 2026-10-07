@@ -206,3 +206,32 @@ SQL parametrizado via `$queryRaw` para o bloqueio `FOR UPDATE`; a busca usa
 `INSTR` para preservar a procura literal sem distinguir maiúsculas.
 Todas as operações de estoque, pedido e cartão usam a mesma transação.
 Os timestamps BIGINT são convertidos para números seguros antes de saírem na API.
+
+## Scheduler de demonstração
+
+Em outro terminal, execute:
+
+```powershell
+npm.cmd run scheduler
+```
+
+O primeiro ciclo começa imediatamente. A cada 15 segundos, o scheduler cria um
+comprador fictício e seu endereço, autentica esse usuário com senha e sessão JWT
+e registra uma compra com pagamento simulado. Um vendedor fictício é criado na
+primeira execução e reutilizado. Cada ciclo cria um produto exclusivo de R$ 100,00;
+o pedido custa R$ 115,90 com frete e aparece em Minhas vendas do vendedor.
+O produto é desativado após a compra. Usuários, pedidos e e-mails permanecem no banco.
+
+O scheduler usa Prisma e as mesmas funções de autenticação e compra da API.
+Ele não precisa do servidor HTTP aberto; mantenha `npm.cmd start` em outro terminal
+para acessar a interface. Os limites de requisições da API continuam ativos.
+É necessário configurar o `.env` completo e aplicar as migrations antes de iniciar.
+
+Use `Ctrl+C` para parar: o processo aguarda o ciclo em andamento e fecha a conexão.
+Se um ciclo ultrapassar 15 segundos, a próxima execução espera um horário livre,
+sem sobrepor tarefas. Falhas são registradas no terminal e o próximo ciclo tenta novamente.
+Para executar apenas um ciclo:
+
+```powershell
+npm.cmd run scheduler -- --once
+```

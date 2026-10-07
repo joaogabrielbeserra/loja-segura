@@ -19,7 +19,8 @@
     "db:validate": "prisma validate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "scheduler": "node --env-file=.env scripts/scheduler.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

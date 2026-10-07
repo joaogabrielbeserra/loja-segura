@@ -216,6 +216,23 @@ async function main() {
   const logTexto = JSON.stringify((await db.auditLog.findMany({  })));
   checar('Log não contém senha, token nem cartão', !logTexto.includes('Nova-Senha') && !logTexto.includes(token) && !logTexto.includes('4111'));
 
+  console.log('\nScheduler · Cadastro, login e venda');
+  const usuariosAntes = await db.user.count();
+  const pedidosAntes = await db.order.count();
+  for (let ciclo = 0; ciclo < 2; ciclo++) {
+    execFileSync(process.execPath, [path.join(__dirname, 'scheduler.js'), '--once'], {
+      stdio: 'pipe', env: process.env, timeout: 30000,
+    });
+  }
+  const vendedorSimulado = await db.user.findUnique({ where: { email: 'scheduler-vendedor@exemplo.com' } });
+  const vendasSimuladas = await db.order.findMany({ where: { seller_id: vendedorSimulado.id } });
+  checar('Dois ciclos criam dois compradores e reutilizam um vendedor', await db.user.count() === usuariosAntes + 3);
+  checar('Cada ciclo registra uma venda com preço e frete corretos', await db.order.count() === pedidosAntes + 2 && vendasSimuladas.every((v) => v.total_cents === 11590));
+  const loginsSimulados = await db.auditLog.count({ where: { event: 'LOGIN_OK', user_id: { in: vendasSimuladas.map((v) => v.buyer_id) } } });
+  checar('Compradores simulados realizam login auditado', loginsSimulados === 2);
+  const produtosSimulados = await db.product.findMany({ where: { seller_id: vendedorSimulado.id } });
+  checar('Estoque simulado é consumido e anúncios ficam inativos', produtosSimulados.length === 2 && produtosSimulados.every((p) => p.stock === 0 && p.active === 0));
+
   console.log(`\nResultado: ${ok} aprovados, ${falhas} reprovados\n`);
   process.exitCode = falhas ? 1 : 0;
 }

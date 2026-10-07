@@ -6,14 +6,18 @@ const { HttpError } = require('../lib/http-error');
 
 const OPCOES_COOKIE = () => ({ httpOnly: true, secure: config.isProd, sameSite: 'strict', path: '/' });
 
-function emitirSessao(res, usuario) {
-  const token = jwt.sign({ tv: usuario.token_version }, config.jwtSecret, {
+function criarTokenSessao(usuario) {
+  return jwt.sign({ tv: usuario.token_version }, config.jwtSecret, {
     algorithm: 'HS256',
     subject: usuario.id,
     issuer: config.jwt.issuer,
     audience: config.jwt.audience,
     expiresIn: config.jwt.expiresInSec,
   });
+}
+
+function emitirSessao(res, usuario) {
+  const token = criarTokenSessao(usuario);
   res.cookie('sid', token, { ...OPCOES_COOKIE(), maxAge: config.jwt.expiresInSec * 1000 });
 }
 
@@ -45,4 +49,4 @@ function encerrarSessao(res) {
   res.clearCookie('sid', OPCOES_COOKIE());
 }
 
-module.exports = { exigirLogin, emitirSessao, encerrarSessao, lerSessao };
+module.exports = { exigirLogin, emitirSessao, encerrarSessao, lerSessao, criarTokenSessao };
