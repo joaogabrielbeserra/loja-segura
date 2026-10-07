@@ -1,0 +1,27 @@
+{
+  "name": "balcao-loja-segura",
+  "version": "1.0.0",
+  "description": "Marketplace de compra e venda com entrega, construído seguindo boas práticas OWASP",
+  "main": "src/server.js",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "setup": "node scripts/gerar-env.js",
+    "seed": "node --env-file=.env --disable-warning=ExperimentalWarning scripts/seed.js",
+    "start": "node --env-file=.env --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --env-file=.env --disable-warning=ExperimentalWarning scripts/teste-seguranca.js",
+    "audit": "npm audit",
+    "banco": "node --env-file=.env --disable-warning=ExperimentalWarning scripts/ver-banco.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.24.5",
+    "zod": "^4.6.5"
+  }
+}
