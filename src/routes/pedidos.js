@@ -23,12 +23,12 @@ router.post('/', async (req, res) => {
   const dados = schemas.pedido.parse(req.body);
   const comprador = req.usuario;
 
-  const endereco = (await db.prepare('SELECT data_enc FROM addresses WHERE id = ? AND user_id = ?').get(dados.enderecoId, comprador.id));
+  const endereco = (await db.address.findFirst({ where: { id: dados.enderecoId, user_id: comprador.id }, select: { data_enc: true } }));
   if (!endereco) throw new HttpError(404, 'Endereço não encontrado.');
 
   let numeroCartao; let final; let band;
   if ('cartaoId' in dados.pagamento) {
-    const c = (await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(dados.pagamento.cartaoId, comprador.id));
+    const c = (await db.card.findFirst({ where: { id: dados.pagamento.cartaoId, user_id: comprador.id } }));
     if (!c) throw new HttpError(404, 'Cartão não encontrado.');
     const agora = new Date();
     if (c.exp_year < agora.getFullYear() || (c.exp_year === agora.getFullYear() && c.exp_month < agora.getMonth() + 1)) {
@@ -42,7 +42,7 @@ router.post('/', async (req, res) => {
   }
 
   const pedido = await transacao(async () => {
-    const p = (await db.prepare('SELECT * FROM products WHERE id = ? AND active = 1 FOR UPDATE').get(dados.produtoId));
+    const p = (await db.$queryRaw`SELECT * FROM products WHERE id = ${dados.produtoId} AND active = 1 FOR UPDATE`.then((rows) => rows[0]));
     if (!p) throw new HttpError(404, 'Produto não encontrado.');
     if (p.seller_id === comprador.id) throw new HttpError(400, 'Você não pode comprar o seu próprio produto.');
     if (p.stock < dados.quantidade) throw new HttpError(409, `Só há ${p.stock} unidade(s) em estoque.`);
@@ -55,17 +55,12 @@ router.post('/', async (req, res) => {
     if (!pagamento.aprovado) throw new HttpError(402, pagamento.motivo);
 
     // Baixa de estoque condicional: nunca fica negativo, mesmo com compras simultâneas.
-    const baixa = (await db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?')
-      .run(dados.quantidade, p.id, dados.quantidade));
-    if (baixa.changes !== 1) throw new HttpError(409, 'Estoque insuficiente.');
+    const baixa = (await db.product.updateMany({ data: { stock: { decrement: dados.quantidade } }, where: { id: p.id, stock: { gte: dados.quantidade } } }));
+    if (baixa.count !== 1) throw new HttpError(409, 'Estoque insuficiente.');
 
     const id = crypto.randomUUID();
     const agora = Date.now();
-    (await db.prepare(`INSERT INTO orders (id, buyer_id, seller_id, product_id, product_name, unit_cents, quantity,
-                shipping_cents, total_cents, address_enc, card_last4, card_brand, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AGUARDANDO_ENVIO', ?, ?)`)
-      .run(id, comprador.id, p.seller_id, p.id, p.name, p.price_cents, dados.quantidade, frete, total,
-        endereco.data_enc, final, band, agora, agora));
+    (await db.order.create({ data: { id: id, buyer_id: comprador.id, seller_id: p.seller_id, product_id: p.id, product_name: p.name, unit_cents: p.price_cents, quantity: dados.quantidade, shipping_cents: frete, total_cents: total, address_enc: endereco.data_enc, card_last4: final, card_brand: band, status: 'AGUARDANDO_ENVIO', created_at: agora, updated_at: agora } }));
 
     if ('novoCartao' in dados.pagamento && dados.pagamento.salvar) await salvarCartao(comprador.id, dados.pagamento.novoCartao);
     return { id, total, vendedorId: p.seller_id, produto: p.name };
@@ -73,7 +68,7 @@ router.post('/', async (req, res) => {
   // O CVV sai de escopo aqui: nunca foi gravado em banco nem em log.
 
   await auditar('PEDIDO_CRIADO', { userId: comprador.id, req, detalhe: pedido.id });
-  const vendedor = (await db.prepare('SELECT email FROM users WHERE id = ?').get(pedido.vendedorId));
+  const vendedor = (await db.user.findFirst({ where: { id: pedido.vendedorId }, select: { email: true } }));
   await enviarEmail(vendedor.email, 'Você fez uma venda', `Nova venda de "${pedido.produto}". Acesse Minhas vendas para enviar o pedido.`);
   await enviarEmail(comprador.email, 'Pedido confirmado', `Pagamento aprovado para "${pedido.produto}". Avisaremos quando for enviado.`);
   res.status(201).json({ id: pedido.id, totalCents: pedido.total });
@@ -88,18 +83,17 @@ function formatarPedido(o, visao) {
   };
   if (visao === 'comprador') r.cartao = `${o.card_brand} final ${o.card_last4}`;
   // O vendedor vê só o necessário para entregar: nome e endereço. Nunca CPF, telefone ou cartão.
-  if (visao === 'vendedor') r.comprador = decifrar(o.buyer_name_enc);
+  if (visao === 'vendedor') r.comprador = decifrar(o.buyer.name_enc);
   return r;
 }
 
 router.get('/compras', async (req, res) => {
-  const linhas = (await db.prepare('SELECT * FROM orders WHERE buyer_id = ? ORDER BY created_at DESC').all(req.usuario.id));
+  const linhas = (await db.order.findMany({ where: { buyer_id: req.usuario.id }, orderBy: { created_at: "desc" } }));
   res.json({ pedidos: linhas.map((o) => formatarPedido(o, 'comprador')) });
 });
 
 router.get('/vendas', async (req, res) => {
-  const linhas = (await db.prepare(`SELECT o.*, u.name_enc AS buyer_name_enc FROM orders o JOIN users u ON u.id = o.buyer_id
-                             WHERE o.seller_id = ? ORDER BY o.created_at DESC`).all(req.usuario.id));
+  const linhas = (await db.order.findMany({ where: { seller_id: req.usuario.id }, orderBy: { created_at: "desc" }, include: { buyer: { select: { name_enc: true } } } }));
   res.json({ pedidos: linhas.map((o) => formatarPedido(o, 'vendedor')) });
 });
 
@@ -107,16 +101,15 @@ router.get('/vendas', async (req, res) => {
 async function mudarStatus({ req, papel, de, para, extra = {} }) {
   const id = schemas.uuid.parse(req.params.id);
   const coluna = papel === 'vendedor' ? 'seller_id' : 'buyer_id';
-  const pedido = (await db.prepare(`SELECT * FROM orders WHERE id = ? AND ${coluna} = ?`).get(id, req.usuario.id));
+  const pedido = (await db.order.findFirst({ where: { id: id, [coluna]: req.usuario.id } }));
   if (!pedido) throw new HttpError(404, 'Pedido não encontrado.');
   if (pedido.status !== de) throw new HttpError(409, 'Esse pedido não está no status certo para essa ação.');
   const agora = Date.now();
   await transacao(async () => {
-    const alteracao = (await db.prepare(`UPDATE orders SET status = ?, tracking_code = COALESCE(?, tracking_code), updated_at = ?
-                WHERE id = ? AND status = ?`).run(para, extra.codigoRastreio ?? null, agora, id, de));
-    if (alteracao.changes !== 1) throw new HttpError(409, 'O status do pedido já foi alterado.');
+    const alteracao = (await db.order.updateMany({ data: { status: para, tracking_code: extra.codigoRastreio ?? undefined, updated_at: agora }, where: { id: id, status: de } }));
+    if (alteracao.count !== 1) throw new HttpError(409, 'O status do pedido já foi alterado.');
     if (para === 'CANCELADO') {
-      (await db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(pedido.quantity, pedido.product_id));
+      (await db.product.updateMany({ data: { stock: { increment: pedido.quantity } }, where: { id: pedido.product_id } }));
     }
   });
   await auditar(`PEDIDO_${para}`, { userId: req.usuario.id, req, detalhe: id });
@@ -126,7 +119,7 @@ async function mudarStatus({ req, papel, de, para, extra = {} }) {
 router.post('/:id/enviar', async (req, res) => {
   const { codigoRastreio } = schemas.rastreio.parse(req.body);
   const pedido = await mudarStatus({ req, papel: 'vendedor', de: 'AGUARDANDO_ENVIO', para: 'ENVIADO', extra: { codigoRastreio } });
-  const comprador = (await db.prepare('SELECT email FROM users WHERE id = ?').get(pedido.buyer_id));
+  const comprador = (await db.user.findFirst({ where: { id: pedido.buyer_id }, select: { email: true } }));
   await enviarEmail(comprador.email, 'Seu pedido foi enviado', `"${pedido.product_name}" saiu para entrega. Rastreio: ${codigoRastreio}`);
   res.json({ ok: true });
 });

@@ -3,7 +3,6 @@ const config = require('../config');
 const { db } = require('../db');
 const { HttpError } = require('../lib/http-error');
 
-const buscarUsuario = db.prepare('SELECT * FROM users WHERE id = ?');
 
 const OPCOES_COOKIE = () => ({ httpOnly: true, secure: config.isProd, sameSite: 'strict', path: '/' });
 
@@ -26,7 +25,7 @@ async function lerSessao(req) {
     const payload = jwt.verify(token, config.jwtSecret, {
       algorithms: ['HS256'], issuer: config.jwt.issuer, audience: config.jwt.audience,
     });
-    const usuario = (await buscarUsuario.get(payload.sub));
+    const usuario = (await db.user.findUnique({ where: { id: payload.sub } }));
     // token_version muda no logout e na troca de senha → invalida sessões antigas.
     if (!usuario || usuario.token_version !== payload.tv) return null;
     return usuario;

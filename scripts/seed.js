@@ -16,21 +16,18 @@ function gerarCpf() {
 }
 
 async function criarUsuario({ nome, email, telefone, senha }) {
-  const existente = (await db.prepare('SELECT id FROM users WHERE email = ?').get(email));
+  const existente = (await db.user.findFirst({ where: { email: email }, select: { id: true } }));
   if (existente) return existente.id;
   const id = crypto.randomUUID();
   const cpf = gerarCpf();
-  (await db.prepare(`INSERT INTO users (id, email, password_hash, name_enc, cpf_enc, cpf_index, phone_enc, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, email, await hashSenha(senha), cifrar(nome), cifrar(cpf), indiceCego(cpf), cifrar(telefone), Date.now()));
+  (await db.user.create({ data: { id: id, email: email, password_hash: await hashSenha(senha), name_enc: cifrar(nome), cpf_enc: cifrar(cpf), cpf_index: indiceCego(cpf), phone_enc: cifrar(telefone), created_at: Date.now() } }));
   return id;
 }
 
 async function criarEndereco(userId, dados) {
-  const ja = (await db.prepare('SELECT 1 FROM addresses WHERE user_id = ?').get(userId));
+  const ja = (await db.address.findFirst({ where: { user_id: userId } }));
   if (ja) return;
-  (await db.prepare('INSERT INTO addresses (id, user_id, data_enc, created_at) VALUES (?, ?, ?, ?)')
-    .run(crypto.randomUUID(), userId, cifrar(JSON.stringify(dados)), Date.now()));
+  (await db.address.create({ data: { id: crypto.randomUUID(), user_id: userId, data_enc: cifrar(JSON.stringify(dados)), created_at: Date.now() } }));
 }
 
 (async () => {
@@ -44,7 +41,7 @@ async function criarEndereco(userId, dados) {
   await criarEndereco(ana, { cep: '11660000', rua: 'Avenida da Praia', numero: '100', complemento: '', bairro: 'Centro', cidade: 'Caraguatatuba', uf: 'SP' });
   await criarEndereco(bruno, { cep: '12245000', rua: 'Rua das Acácias', numero: '45', complemento: 'Apto 12', bairro: 'Jardim Aquarius', cidade: 'São José dos Campos', uf: 'SP' });
 
-  const temProdutos = (await db.prepare('SELECT 1 FROM products WHERE seller_id = ?').get(ana));
+  const temProdutos = (await db.product.findFirst({ where: { seller_id: ana } }));
   if (!temProdutos) {
     const produtos = [
       ['Cadeira de praia dobrável', 'Alumínio, 5 posições, suporta até 110 kg.', 18990, 8],
@@ -52,9 +49,7 @@ async function criarEndereco(userId, dados) {
       ['Caixa térmica 32 litros', 'Mantém o gelo por até 24 horas.', 21950, 3],
       ['Kit de frescobol', 'Duas raquetes de madeira e duas bolas.', 7990, 12],
     ];
-    const ins = db.prepare(`INSERT INTO products (id, seller_id, name, description, price_cents, stock, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)`);
-    for (const [i, [nome, desc, preco, est]] of produtos.entries()) { await ins.run(crypto.randomUUID(), ana, nome, desc, preco, est, Date.now() + i); }
+    for (const [i, [nome, desc, preco, est]] of produtos.entries()) { await db.product.create({ data: { id: crypto.randomUUID(), seller_id: ana, name: nome, description: desc, price_cents: preco, stock: est, created_at: Date.now() + i } }); }
   }
   console.log('Dados de demonstração criados:');
   console.log('  Vendedora: ana@exemplo.com   / Balcao-Vendedora-2026');

@@ -38,24 +38,21 @@ router.post('/cadastro', limiteCadastro, async (req, res) => {
   if (problema) throw new HttpError(400, 'Confira os campos destacados.', { senha: problema });
 
   const cpfIdx = indiceCego(dados.cpf);
-  const existe = (await db.prepare('SELECT 1 FROM users WHERE email = ? OR cpf_index = ?').get(dados.email, cpfIdx));
+  const existe = (await db.user.findFirst({ where: { OR: [{ email: dados.email }, { cpf_index: cpfIdx }] } }));
   if (existe) {
     // Mensagem genérica: não revela se foi o e-mail ou o CPF que já existe.
     throw new HttpError(409, 'Não foi possível criar a conta com esses dados. Se você já tem conta, entre ou recupere a senha.');
   }
 
   const id = crypto.randomUUID();
-  (await db.prepare(`INSERT INTO users (id, email, password_hash, name_enc, cpf_enc, cpf_index, phone_enc, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, dados.email, await hashSenha(dados.senha), cifrar(dados.nome), cifrar(dados.cpf), cpfIdx,
-      cifrar(dados.telefone), Date.now()));
+  (await db.user.create({ data: { id: id, email: dados.email, password_hash: await hashSenha(dados.senha), name_enc: cifrar(dados.nome), cpf_enc: cifrar(dados.cpf), cpf_index: cpfIdx, phone_enc: cifrar(dados.telefone), created_at: Date.now() } }));
   await auditar('CADASTRO', { userId: id, req });
   res.status(201).json({ message: 'Conta criada. Agora é só entrar.' });
 });
 
 router.post('/login', limiteLogin, async (req, res) => {
   const { email, senha } = schemas.login.parse(req.body);
-  const usuario = (await db.prepare('SELECT * FROM users WHERE email = ?').get(email));
+  const usuario = (await db.user.findFirst({ where: { email: email } }));
   const agora = Date.now();
 
   if (!usuario) {
@@ -73,21 +70,20 @@ router.post('/login', limiteLogin, async (req, res) => {
   if (!(await verificarSenha(senha, usuario.password_hash))) {
     const tentativas = usuario.failed_attempts + 1;
     if (tentativas >= config.lockout.maxTentativas) {
-      (await db.prepare('UPDATE users SET failed_attempts = 0, locked_until = ? WHERE id = ?')
-        .run(agora + config.lockout.bloqueioMs, usuario.id));
+      (await db.user.updateMany({ data: { failed_attempts: 0, locked_until: agora + config.lockout.bloqueioMs }, where: { id: usuario.id } }));
       await auditar('CONTA_BLOQUEADA', { userId: usuario.id, req, detalhe: `${tentativas} tentativas` });
       await enviarEmail(usuario.email, 'Sua conta foi bloqueada temporariamente',
         `Detectamos ${tentativas} tentativas de login com senha errada na sua conta.\n` +
         'Por segurança, o acesso ficará bloqueado por 15 minutos.\n' +
         'Se não foi você, recomendamos redefinir sua senha.');
     } else {
-      (await db.prepare('UPDATE users SET failed_attempts = ? WHERE id = ?').run(tentativas, usuario.id));
+      (await db.user.updateMany({ data: { failed_attempts: tentativas }, where: { id: usuario.id } }));
       await auditar('LOGIN_FALHA', { userId: usuario.id, req, detalhe: `tentativa ${tentativas}` });
     }
     throw new HttpError(401, FALHA_LOGIN);
   }
 
-  (await db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?').run(usuario.id));
+  (await db.user.updateMany({ data: { failed_attempts: 0, locked_until: null }, where: { id: usuario.id } }));
   emitirSessao(res, usuario);
   emitirCsrf(res); // rotação do token CSRF a cada login
   await auditar('LOGIN_OK', { userId: usuario.id, req });
@@ -98,7 +94,7 @@ router.post('/logout', async (req, res) => {
   const usuario = await lerSessao(req);
   if (usuario) {
     // Incrementar a versão invalida o JWT no servidor, não só no navegador.
-    (await db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(usuario.id));
+    (await db.user.updateMany({ data: { token_version: { increment: 1 } }, where: { id: usuario.id } }));
     await auditar('LOGOUT', { userId: usuario.id, req });
   }
   encerrarSessao(res);
@@ -111,15 +107,14 @@ router.get('/me', exigirLogin, async (req, res) => {
 
 router.post('/esqueci-senha', limiteRecuperacao, async (req, res) => {
   const { email } = schemas.esqueci.parse(req.body);
-  const usuario = (await db.prepare('SELECT id, email FROM users WHERE email = ?').get(email));
+  const usuario = (await db.user.findFirst({ where: { email: email }, select: { id: true, email: true } }));
   if (usuario) {
     const agora = Date.now();
     const token = tokenAleatorio(32);
     await transacao(async () => {
       // Invalida links anteriores ainda não usados.
-      (await db.prepare('UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(agora, usuario.id));
-      (await db.prepare('INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(crypto.randomUUID(), usuario.id, sha256(token), agora + config.resetTokenMs, agora));
+      (await db.passwordReset.updateMany({ data: { used_at: agora }, where: { user_id: usuario.id, used_at: null } }));
+      (await db.passwordReset.create({ data: { id: crypto.randomUUID(), user_id: usuario.id, token_hash: sha256(token), expires_at: agora + config.resetTokenMs, created_at: agora } }));
     });
     // Token no fragmento (#) da URL: não vai para logs de servidor, proxies nem cabeçalho Referer.
     await enviarEmail(usuario.email, 'Redefinição de senha',
@@ -137,11 +132,11 @@ router.post('/esqueci-senha', limiteRecuperacao, async (req, res) => {
 router.post('/redefinir-senha', limiteRecuperacao, async (req, res) => {
   const { token, senha } = schemas.redefinir.parse(req.body);
   const agora = Date.now();
-  const registro = (await db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(sha256(token)));
+  const registro = (await db.passwordReset.findFirst({ where: { token_hash: sha256(token) } }));
   if (!registro || registro.used_at || registro.expires_at < agora) {
     throw new HttpError(400, 'Esse link é inválido ou expirou. Peça um novo.');
   }
-  const usuario = (await db.prepare('SELECT * FROM users WHERE id = ?').get(registro.user_id));
+  const usuario = (await db.user.findFirst({ where: { id: registro.user_id } }));
   const problema = problemaNaSenha(senha, usuario.email);
   if (problema) throw new HttpError(400, 'Confira os campos destacados.', { senha: problema });
   if (await verificarSenha(senha, usuario.password_hash)) {
@@ -150,9 +145,12 @@ router.post('/redefinir-senha', limiteRecuperacao, async (req, res) => {
 
   const novoHash = await hashSenha(senha);
   await transacao(async () => {
-    (await db.prepare(`UPDATE users SET password_hash = ?, token_version = token_version + 1,
-                failed_attempts = 0, locked_until = NULL WHERE id = ?`).run(novoHash, usuario.id));
-    (await db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ?').run(agora, registro.id));
+    const consumo = await db.passwordReset.updateMany({
+      where: { id: registro.id, used_at: null, expires_at: { gte: Date.now() } },
+      data: { used_at: agora },
+    });
+    if (consumo.count !== 1) throw new HttpError(400, 'Esse link é inválido ou expirou. Peça um novo.');
+    (await db.user.updateMany({ data: { password_hash: novoHash, token_version: { increment: 1 }, failed_attempts: 0, locked_until: null }, where: { id: usuario.id } }));
   });
   await enviarEmail(usuario.email, 'Sua senha foi alterada',
     'A senha da sua conta acabou de ser alterada e todas as sessões abertas foram encerradas.\n' +

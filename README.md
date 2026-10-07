@@ -4,8 +4,8 @@ Sistema de compra e venda de produtos com entrega, construído para demonstrar c
 em uma aplicação que lida com dados sensíveis (nomes, CPFs, endereços, telefones e cartões de crédito),
 seguindo o **OWASP Top 10 (2021)**, o **OWASP ASVS** e os cheat sheets do OWASP.
 
-Stack: Node.js 22 + Express 5, MySQL 8.4 com driver `mysql2`, frontend em JavaScript puro.
-Só 7 dependências de produção, todas amplamente usadas e sem vulnerabilidades conhecidas (`npm audit`).
+Stack: Node.js 22 + Express 5, MySQL 8.4 com Prisma ORM 6.19, frontend em JavaScript puro.
+O acesso ao banco usa Prisma Client; `mysql2` é usado apenas para criar e remover o banco isolado dos testes.
 
 ## Como rodar
 
@@ -13,12 +13,12 @@ Pré-requisitos: Node.js 22.13 ou superior e MySQL 8.4.
 
 Após `npm run setup`, configure `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e
 `DB_PASSWORD` no `.env`. Crie o banco e um usuário com acesso a ele antes do seed.
-As tabelas são criadas automaticamente; a aplicação não cria o banco.
+As tabelas são criadas com `npm run db:migrate`; a aplicação apenas conecta ao banco.
 
 ```sql
 CREATE DATABASE balcao CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
 CREATE USER 'balcao'@'localhost' IDENTIFIED BY 'troque-esta-senha';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, REFERENCES ON balcao.* TO 'balcao'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES ON balcao.* TO 'balcao'@'localhost';
 ```
 
 `npm test` usa um banco temporário exclusivo e o remove no final. Para os testes,
@@ -29,6 +29,7 @@ transferidos automaticamente para MySQL. Mantenha as chaves existentes do `.env`
 ```bash
 npm install
 npm run setup   # gera o .env com chaves aleatórias
+npm run db:migrate # aplica as migrations do Prisma
 npm run seed    # cria usuários e produtos de demonstração
 npm start       # abre em http://localhost:3000
 npm test        # roda os testes automatizados de segurança em banco isolado
@@ -82,7 +83,7 @@ Os e-mails (recuperação de senha, bloqueio de conta, avisos de pedido) aparece
 - Em produção: cookies com `Secure` e cabeçalho HSTS.
 
 ### A03: Injeção
-- 100% das consultas SQL usam parâmetros (`?`); nenhuma concatenação de strings.
+- Consultas usam os filtros do Prisma e SQL parametrizado via `$queryRaw`; nenhum dado do usuário é concatenado ao SQL.
 - Toda entrada é validada no servidor com schemas de allowlist (zod) com tipos, tamanhos e formatos.
   Campos não previstos são **rejeitados** (`.strict()`), o que bloqueia mass assignment
   (ex.: mandar `"admin": true` ou `"precoCents": 1` junto com o pedido).
@@ -106,7 +107,7 @@ Os e-mails (recuperação de senha, bloqueio de conta, avisos de pedido) aparece
 
 ### A06: Componentes vulneráveis e desatualizados
 - Poucas dependências, versões fixadas pelo `package-lock.json`, verificação com `npm audit`.
-- Banco usa `mysql2` com consultas parametrizadas; criptografia usa `node:crypto`.
+- Banco usa Prisma ORM com consultas parametrizadas; criptografia usa `node:crypto`.
 
 ### A07: Falhas de identificação e autenticação
 - Política de senha do NIST 800-63B / ASVS: mínimo de 12 caracteres, máximo de 128, bloqueio de senhas
@@ -171,7 +172,7 @@ visível ao titular.
 src/
   server.js            cabeçalhos, CSP, limites e montagem das rotas
   config.js            leitura e validação das chaves (fail fast)
-  db.js                pool MySQL e transações
+  db.js                Prisma Client e transações
   lib/crypto.js        scrypt, AES-256-GCM, HMAC, tokens
   lib/validacao.js     schemas de entrada, CPF, Luhn, política de senha
   lib/auditoria.js     log de eventos de segurança
@@ -180,3 +181,28 @@ src/
 public/                frontend (index.html, app.js, styles.css)
 scripts/               setup, seed, testes de segurança, visualização do banco
 ```
+
+## Prisma ORM
+
+Os modelos e relações ficam em `prisma/schema.prisma`, com nomes mapeados para
+as tabelas MySQL existentes. `prisma.config.ts` monta a conexão usando as mesmas
+variáveis `DB_*` do `.env`; não é necessário duplicar credenciais.
+
+```bash
+npm run db:generate             # gera o Prisma Client
+npm run db:validate             # valida o schema
+npm run db:migrate              # aplica migrations pendentes
+npm run db:migrate:dev -- --name nome_da_alteracao
+npm run db:studio               # interface visual do banco
+```
+
+Para um banco que já possui as tabelas da versão anterior, confira a estrutura
+contra a migration inicial antes de registrar a baseline:
+`npx prisma migrate resolve --applied 20261006000000_init`. Depois use
+`npm run db:migrate`. Não aplique a migration inicial sobre tabelas existentes.
+
+Consultas, inserções e alterações usam os modelos do Prisma. A compra mantém
+SQL parametrizado via `$queryRaw` para o bloqueio `FOR UPDATE`; a busca usa
+`INSTR` para preservar a procura literal sem distinguir maiúsculas.
+Todas as operações de estoque, pedido e cartão usam a mesma transação.
+Os timestamps BIGINT são convertidos para números seguros antes de saírem na API.

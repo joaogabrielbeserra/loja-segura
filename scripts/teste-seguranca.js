@@ -2,6 +2,8 @@
 // e executa ataques/abusos comuns, conferindo se são bloqueados.
 // Uso: npm test
 const mysql = require('mysql2/promise');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 const dbTemp = `balcao_teste_${Date.now()}_${process.pid}`;
 process.env.DB_NAME = dbTemp;
 process.env.TRUST_PROXY = 'true'; // permite simular clientes com IPs diferentes via X-Forwarded-For
@@ -44,7 +46,7 @@ function cliente(ip) {
 }
 
 async function ultimoEmail(para, assunto) {
-  return (await db.prepare('SELECT * FROM outbox WHERE to_email = ? AND subject = ? ORDER BY id DESC LIMIT 1').get(para, assunto));
+  return (await db.outbox.findFirst({ where: { to_email: para, subject: assunto }, orderBy: { id: "desc" } }));
 }
 
 async function main() {
@@ -52,6 +54,7 @@ async function main() {
   admin = await mysql.createConnection(conexao);
   await admin.query(`CREATE DATABASE ${dbTemp} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`);
   criado = true;
+  execFileSync(process.execPath, [path.join(__dirname, '..', 'node_modules', 'prisma', 'build', 'index.js'), 'migrate', 'deploy'], { stdio: 'inherit', env: process.env });
   await inicializar();
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
@@ -90,7 +93,7 @@ async function main() {
   checar('CPF duplicado recusado com mensagem genérica', r.status === 409 && !/cpf/i.test(r.json.error));
 
   console.log('\nA02 · Dados sensíveis cifrados no banco');
-  const linha = (await db.prepare("SELECT * FROM users WHERE email = 'carla@exemplo.com'").get());
+  const linha = (await db.user.findFirst({ where: { email: 'carla@exemplo.com' } }));
   checar('Nome, CPF e telefone gravados cifrados (AES-256-GCM)', [linha.name_enc, linha.cpf_enc, linha.phone_enc].every((v) => v.startsWith('v1:')));
   checar('CPF não aparece em claro no banco', !JSON.stringify(linha).includes('52998224725'));
   checar('Senha guardada como hash scrypt com salt', linha.password_hash.startsWith('scrypt$'));
@@ -112,7 +115,7 @@ async function main() {
   checar('Resposta idêntica para e-mail cadastrado ou não', r.json.message === respDesconhecido);
   const email = await ultimoEmail('carla@exemplo.com', 'Redefinição de senha');
   const token = email.body.match(/token=([\w-]+)/)[1];
-  const hashNoBanco = (await db.prepare('SELECT token_hash FROM password_resets ORDER BY created_at DESC LIMIT 1').get()).token_hash;
+  const hashNoBanco = (await db.passwordReset.findFirst({ orderBy: { created_at: "desc" }, select: { token_hash: true } })).token_hash;
   checar('Banco guarda só o hash do token, não o token', hashNoBanco !== token && hashNoBanco.length === 64);
   r = await carla.post('/api/auth/redefinir-senha', { token: 'token-inventado-aaaaaaaaaaaaaaa', senha: 'Nova-Senha-Forte-2026' });
   checar('Token inventado é recusado', r.status === 400);
@@ -159,15 +162,15 @@ async function main() {
   r = await carla.post('/api/pedidos', { ...pedidoBase, pagamento: { novoCartao: { ...cartaoOk, numero: '4111 1111 1111 1112' }, cvv: '123' } });
   checar('Cartão com número inválido (Luhn) é recusado', r.status === 400);
   r = await carla.post('/api/pedidos', { ...pedidoBase, pagamento: { novoCartao: { ...cartaoOk, numero: '4000 0000 0000 0002' }, cvv: '123' } });
-  checar('Pagamento recusado pela operadora não gera pedido', r.status === 402 && (await db.prepare('SELECT COUNT(*) n FROM orders').get()).n === 0);
+  checar('Pagamento recusado pela operadora não gera pedido', r.status === 402 && (await db.order.count({  }).then((n) => ({ n }))).n === 0);
   r = await carla.post('/api/pedidos', { ...pedidoBase, pagamento: { novoCartao: cartaoOk, cvv: '987', salvar: true } });
   const pedidoId = r.json.id;
   checar('Compra válida aprovada, total calculado no servidor (100,00 + frete 15,90)', r.status === 201 && r.json.totalCents === 11590);
-  checar('Estoque baixado corretamente', (await db.prepare('SELECT stock FROM products WHERE id = ?').get(produtoId)).stock === 1);
+  checar('Estoque baixado corretamente', (await db.product.findFirst({ where: { id: produtoId }, select: { stock: true } })).stock === 1);
 
-  const bytesBanco = JSON.stringify(await db.prepare('SELECT * FROM cards').all());
+  const bytesBanco = JSON.stringify(await db.card.findMany({  }));
   checar('Número do cartão não aparece em claro nos registros do banco', !bytesBanco.includes('4111111111111111'));
-  checar('Tabela de cartões não tem coluna de CVV', !(await db.prepare("SELECT COLUMN_NAME AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'cards'").all()).some((c) => /cvv/i.test(c.name)));
+  checar('Tabela de cartões não tem coluna de CVV', !(await db.$queryRaw`SELECT COLUMN_NAME AS name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'cards'`).some((c) => /cvv/i.test(c.name)));
   r = await carla.get('/api/perfil');
   checar('API devolve só final e bandeira do cartão', r.json.cartoes[0]?.final === '1111' && !JSON.stringify(r.json).includes('4111111111111111'));
   r = await carla.get('/api/auth/me');
@@ -208,9 +211,9 @@ async function main() {
   checar('11ª tentativa de login do mesmo IP em 15 min recebe 429', ultimo.status === 429);
 
   console.log('\nA09 · Auditoria');
-  const eventos = (await db.prepare('SELECT DISTINCT event FROM audit_log').all()).map((e) => e.event);
+  const eventos = (await db.auditLog.findMany({ distinct: ["event"], select: { event: true } })).map((e) => e.event);
   checar('Eventos de segurança registrados', ['LOGIN_FALHA', 'CONTA_BLOQUEADA', 'SENHA_REDEFINIDA', 'PEDIDO_CRIADO'].every((e) => eventos.includes(e)));
-  const logTexto = JSON.stringify((await db.prepare('SELECT * FROM audit_log').all()));
+  const logTexto = JSON.stringify((await db.auditLog.findMany({  })));
   checar('Log não contém senha, token nem cartão', !logTexto.includes('Nova-Senha') && !logTexto.includes(token) && !logTexto.includes('4111'));
 
   console.log(`\nResultado: ${ok} aprovados, ${falhas} reprovados\n`);
