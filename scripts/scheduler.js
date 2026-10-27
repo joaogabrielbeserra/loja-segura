@@ -10,7 +10,7 @@ const { registrarPedido } = require('../src/lib/pedidos');
 const INTERVALO_MS = 5_000;
 const EMAIL_VENDEDOR = 'scheduler-vendedor@exemplo.com';
 let timer;
-let tarefa;
+let resolverEspera;
 let parando = false;
 let ciclos = 0;
 
@@ -95,13 +95,23 @@ async function executarCiclo(vendedor) {
   console.log(`[scheduler] Venda registrada: ${venda.id} | Total: R$ ${(venda.totalCents / 100).toFixed(2)} | Ciclo ${ciclos}`);
 }
 
-async function encerrar() {
-  if (parando) return;
+function solicitarParada() {
   parando = true;
-  clearInterval(timer);
-  console.log('[scheduler] Encerrando após o ciclo em andamento...');
-  if (tarefa) await tarefa;
-  await db.close();
+  if (timer) clearTimeout(timer);
+  timer = null;
+  if (resolverEspera) resolverEspera();
+  resolverEspera = null;
+}
+
+function aguardar(ms) {
+  return new Promise((resolve) => {
+    resolverEspera = resolve;
+    timer = setTimeout(() => {
+      timer = null;
+      resolverEspera = null;
+      resolve();
+    }, ms);
+  });
 }
 
 async function main() {
@@ -111,21 +121,26 @@ async function main() {
     try { await executarCiclo(vendedor); } finally { await db.close(); }
     return;
   }
-  function disparar() {
-    if (parando || tarefa) return;
-    tarefa = executarCiclo(vendedor)
-      .catch((erro) => console.error(`[scheduler] Ciclo falhou (${erro.code || 'erro'}): ${erro.message}`))
-      .finally(() => { tarefa = null; });
+  process.once('SIGINT', solicitarParada);
+  process.once('SIGTERM', solicitarParada);
+  console.log('[scheduler] Fila serial ativa: cadastro, endereço, produto e venda; pausa de 5 segundos entre ciclos. Ctrl+C para parar.');
+  try {
+    while (!parando) {
+      try {
+        await executarCiclo(vendedor);
+      } catch (erro) {
+        console.error(`[scheduler] Ciclo falhou (${erro.code || 'erro'}): ${erro.message}`);
+      }
+      if (!parando) await aguardar(INTERVALO_MS);
+    }
+  } finally {
+    console.log('[scheduler] Fila encerrada após o ciclo atual.');
+    await db.close();
   }
-  process.once('SIGINT', () => { encerrar().catch(falhar); });
-  process.once('SIGTERM', () => { encerrar().catch(falhar); });
-  console.log('[scheduler] Ativo: cadastro, login e venda a cada 5 segundos. Ctrl+C para parar.');
-  timer = setInterval(disparar, INTERVALO_MS);
-  disparar();
 }
 
 async function falhar(erro) {
-  clearInterval(timer);
+  solicitarParada();
   console.error(`[scheduler] Falha (${erro.code || 'erro'}): ${erro.message}`);
   process.exitCode = 1;
   await db.close();
