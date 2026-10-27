@@ -215,7 +215,7 @@ Em outro terminal, execute:
 npm.cmd run scheduler
 ```
 
-O primeiro ciclo começa imediatamente. A cada 5 segundos, o scheduler cria um
+O primeiro ciclo começa imediatamente. A cada 5 minutos, o scheduler cria um
 comprador fictício e seu endereço, autentica esse usuário com senha e sessão JWT
 e registra uma compra com pagamento simulado. Um vendedor fictício é criado na
 primeira execução e reutilizado. Cada ciclo cria um produto exclusivo de R$ 100,00;
@@ -228,7 +228,7 @@ para acessar a interface. Os limites de requisições da API continuam ativos.
 É necessário configurar o `.env` completo e aplicar as migrations antes de iniciar.
 
 Use `Ctrl+C` para parar: o processo aguarda o ciclo em andamento e fecha a conexão.
-Se um ciclo ultrapassar 5 segundos, a próxima execução espera um horário livre,
+Se um ciclo ultrapassar 5 minutos, a próxima execução espera um horário livre,
 sem sobrepor tarefas. Falhas são registradas no terminal e o próximo ciclo tenta novamente.
 Para executar apenas um ciclo:
 

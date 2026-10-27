@@ -7,7 +7,7 @@ const { autenticarUsuario } = require('../src/lib/autenticacao');
 const { criarTokenSessao, lerSessao } = require('../src/middleware/auth');
 const { registrarPedido } = require('../src/lib/pedidos');
 
-const INTERVALO_MS = 5_000;
+const INTERVALO_MS = 300_000;
 const EMAIL_VENDEDOR = 'scheduler-vendedor@exemplo.com';
 let timer;
 let resolverEspera;
@@ -123,7 +123,7 @@ async function main() {
   }
   process.once('SIGINT', solicitarParada);
   process.once('SIGTERM', solicitarParada);
-  console.log('[scheduler] Fila serial ativa: cadastro, endereço, produto e venda; pausa de 5 segundos entre ciclos. Ctrl+C para parar.');
+  console.log('[scheduler] Fila serial ativa: cadastro, endereço, produto e venda; pausa de 5 minutos entre ciclos. Ctrl+C para parar.');
   try {
     while (!parando) {
       try {
