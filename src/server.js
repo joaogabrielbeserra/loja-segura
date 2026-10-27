@@ -48,6 +48,7 @@ app.use('/api', limiteGeral, (req, res, next) => {
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/perfil', require('./routes/perfil').router);
+app.use('/api/banco', require('./routes/banco'));
 app.use('/api/produtos', require('./routes/produtos'));
 app.use('/api/pedidos', require('./routes/pedidos'));
 if (!config.isProd) app.use('/api/dev', require('./routes/dev'));

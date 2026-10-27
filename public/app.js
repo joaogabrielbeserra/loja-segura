@@ -156,6 +156,7 @@ function montarNav(caminho) {
   const itens = usuario
     ? [link('#/loja', 'Loja'), link('#/vender', 'Vender'), link('#/compras', 'Minhas compras'),
       link('#/vendas', 'Minhas vendas'), link('#/perfil', 'Meus dados'),
+      link('#/banco', 'Banco (meus registros)'),
       link('#/emails', 'Caixa de e-mails (teste)', { class: 'dev' }),
       h('button', { type: 'button', onclick: () => sair() }, `Sair (${usuario.nome.split(' ')[0]})`)]
     : [link('#/loja', 'Loja'), link('#/entrar', 'Entrar'), link('#/cadastro', 'Criar conta'),
@@ -569,6 +570,39 @@ async function telaEmails() {
     }) : h('p', { class: 'sub' }, 'Nenhum e-mail enviado ainda.'));
 }
 
+// ---------- tela: visualização bruta e somente leitura dos dados da própria conta ----------
+async function telaBanco() {
+  const { tabelas } = await api('GET', '/api/banco/tabelas');
+  const seletor = h('select', { 'aria-label': 'Tabela do banco' },
+    tabelas.map((t) => h('option', { value: t.nome }, `${t.rotulo} (${t.total})`)));
+  const conteudo = h('div', {});
+  let offset = 0;
+
+  const carregar = async (novoOffset = 0) => {
+    offset = novoOffset;
+    const nome = seletor.value;
+    const { registros, total, limite } = await api('GET', `/api/banco/${encodeURIComponent(nome)}?offset=${offset}`);
+    const linhas = registros.map((registro, i) => h('details', { class: 'registro' },
+      h('summary', {}, `Registro ${offset + i + 1}`),
+      h('pre', {}, JSON.stringify(registro, null, 2))));
+    const paginas = h('div', { class: 'acoes-banco' },
+      h('button', { class: 'secundario', type: 'button', disabled: offset === 0, onclick: () => carregar(Math.max(0, offset - limite)) }, 'Anterior'),
+      h('span', { class: 'sub' }, total ? `${offset + 1}–${Math.min(offset + limite, total)} de ${total}` : '0 registros'),
+      h('button', { class: 'secundario', type: 'button', disabled: offset + limite >= total, onclick: () => carregar(offset + limite) }, 'Próxima'));
+    conteudo.replaceChildren(
+      ...(linhas.length ? linhas : [h('p', { class: 'sub' }, 'Nenhum registro nesta tabela.')]),
+      paginas);
+  };
+
+  seletor.addEventListener('change', () => carregar(0));
+  await carregar();
+  return h('section', {},
+    h('h1', {}, 'Dados brutos do banco'),
+    h('p', { class: 'sub' }, 'Visualização somente leitura dos registros associados à sua conta. Dados de outros usuários não são exibidos. Senhas, hashes de tokens e conteúdo de e-mails são omitidos; dados pessoais cifrados aparecem como armazenados.'),
+    h('div', { class: 'seletor-banco' }, h('label', {}, 'Tabela', seletor)),
+    conteudo);
+}
+
 // ---------- roteador ----------
 const ROTAS = [
   { padrao: /^#\/loja$/, tela: telaLoja },
@@ -581,6 +615,7 @@ const ROTAS = [
   { padrao: /^#\/compras$/, tela: telaCompras, protegida: true },
   { padrao: /^#\/vendas$/, tela: telaVendas, protegida: true },
   { padrao: /^#\/perfil$/, tela: telaPerfil, protegida: true },
+  { padrao: /^#\/banco$/, tela: telaBanco, protegida: true },
   { padrao: /^#\/emails$/, tela: telaEmails },
 ];
 

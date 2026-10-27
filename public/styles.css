@@ -147,6 +147,12 @@ td input { padding: .35rem .5rem; max-width: 110px; }
 .email { background: var(--superficie); border: 1px solid var(--linha); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: .75rem; }
 .email pre { white-space: pre-wrap; word-break: break-all; font: inherit; font-size: .93rem; margin: .5rem 0; }
 .email .de { font-size: .85rem; color: var(--tinta-suave); }
+.seletor-banco { max-width: 34rem; margin-bottom: 1rem; }
+.registro { background: var(--superficie); border: 1px solid var(--linha); border-radius: 8px; margin: .6rem 0; }
+.registro summary { cursor: pointer; padding: .7rem 1rem; font-weight: 600; }
+.registro pre { overflow: auto; max-height: 28rem; margin: 0; padding: 1rem; border-top: 1px solid var(--linha); background: #f8faf9; font: .82rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.acoes-banco { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: 1rem 0; }
+.acoes-banco .sub { margin: 0; text-align: center; }
 
 @media (max-width: 720px) {
   .colunas { grid-template-columns: 1fr; }
