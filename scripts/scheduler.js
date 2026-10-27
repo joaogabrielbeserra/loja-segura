@@ -7,7 +7,7 @@ const { autenticarUsuario } = require('../src/lib/autenticacao');
 const { criarTokenSessao, lerSessao } = require('../src/middleware/auth');
 const { registrarPedido } = require('../src/lib/pedidos');
 
-const INTERVALO_MS = 15_000;
+const INTERVALO_MS = 5_000;
 const EMAIL_VENDEDOR = 'scheduler-vendedor@exemplo.com';
 let timer;
 let tarefa;
@@ -119,7 +119,7 @@ async function main() {
   }
   process.once('SIGINT', () => { encerrar().catch(falhar); });
   process.once('SIGTERM', () => { encerrar().catch(falhar); });
-  console.log('[scheduler] Ativo: cadastro, login e venda a cada 15 segundos. Ctrl+C para parar.');
+  console.log('[scheduler] Ativo: cadastro, login e venda a cada 5 segundos. Ctrl+C para parar.');
   timer = setInterval(disparar, INTERVALO_MS);
   disparar();
 }

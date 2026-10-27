@@ -215,7 +215,7 @@ Em outro terminal, execute:
 npm.cmd run scheduler
 ```
 
-O primeiro ciclo começa imediatamente. A cada 15 segundos, o scheduler cria um
+O primeiro ciclo começa imediatamente. A cada 5 segundos, o scheduler cria um
 comprador fictício e seu endereço, autentica esse usuário com senha e sessão JWT
 e registra uma compra com pagamento simulado. Um vendedor fictício é criado na
 primeira execução e reutilizado. Cada ciclo cria um produto exclusivo de R$ 100,00;
@@ -228,10 +228,21 @@ para acessar a interface. Os limites de requisições da API continuam ativos.
 É necessário configurar o `.env` completo e aplicar as migrations antes de iniciar.
 
 Use `Ctrl+C` para parar: o processo aguarda o ciclo em andamento e fecha a conexão.
-Se um ciclo ultrapassar 15 segundos, a próxima execução espera um horário livre,
+Se um ciclo ultrapassar 5 segundos, a próxima execução espera um horário livre,
 sem sobrepor tarefas. Falhas são registradas no terminal e o próximo ciclo tenta novamente.
 Para executar apenas um ciclo:
 
 ```powershell
 npm.cmd run scheduler -- --once
 ```
+
+No Kali, para manter o scheduler ativo após reiniciar a VM, instale a unidade do systemd:
+
+```bash
+sudo install -m 0644 deploy/loja-segura-scheduler.service /etc/systemd/system/loja-segura-scheduler.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now loja-segura-scheduler.service
+sudo systemctl status loja-segura-scheduler.service
+```
+
+Cada ciclo contínuo cria um comprador, endereço, produto, pedido e registros de auditoria fictícios. Isso acrescenta dados sem limite automático; pare com `sudo systemctl stop loja-segura-scheduler.service` quando terminar a demonstração.

@@ -156,7 +156,7 @@ function montarNav(caminho) {
   const itens = usuario
     ? [link('#/loja', 'Loja'), link('#/vender', 'Vender'), link('#/compras', 'Minhas compras'),
       link('#/vendas', 'Minhas vendas'), link('#/perfil', 'Meus dados'),
-      link('#/banco', 'Banco (meus registros)'),
+      link('#/banco', 'Banco de dados'),
       link('#/emails', 'Caixa de e-mails (teste)', { class: 'dev' }),
       h('button', { type: 'button', onclick: () => sair() }, `Sair (${usuario.nome.split(' ')[0]})`)]
     : [link('#/loja', 'Loja'), link('#/entrar', 'Entrar'), link('#/cadastro', 'Criar conta'),
@@ -570,7 +570,7 @@ async function telaEmails() {
     }) : h('p', { class: 'sub' }, 'Nenhum e-mail enviado ainda.'));
 }
 
-// ---------- tela: visualização bruta e somente leitura dos dados da própria conta ----------
+// ---------- tela: visualização global bruta e somente leitura ----------
 async function telaBanco() {
   const { tabelas } = await api('GET', '/api/banco/tabelas');
   const seletor = h('select', { 'aria-label': 'Tabela do banco' },
@@ -598,7 +598,8 @@ async function telaBanco() {
   await carregar();
   return h('section', {},
     h('h1', {}, 'Dados brutos do banco'),
-    h('p', { class: 'sub' }, 'Visualização somente leitura dos registros associados à sua conta. Dados de outros usuários não são exibidos. Senhas, hashes de tokens e conteúdo de e-mails são omitidos; dados pessoais cifrados aparecem como armazenados.'),
+    h('p', { class: 'aviso erro' }, 'Todos os usuários autenticados podem consultar os registros de todas as contas. Use somente dados fictícios nesta demonstração.'),
+    h('p', { class: 'sub' }, 'Visualização paginada e somente leitura. Hashes de senha, hashes de tokens e conteúdo dos e-mails são omitidos; dados pessoais cifrados aparecem como armazenados.'),
     h('div', { class: 'seletor-banco' }, h('label', {}, 'Tabela', seletor)),
     conteudo);
 }

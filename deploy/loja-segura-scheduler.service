@@ -1,0 +1,37 @@
+[Unit]
+Description=Loja Segura synthetic user and order generator
+After=network-online.target docker.service loja-segura.service
+Wants=network-online.target
+Requires=loja-segura.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=kali
+Group=kali
+WorkingDirectory=/home/kali/Documents/loja-segura
+EnvironmentFile=/home/kali/Documents/loja-segura/.env
+EnvironmentFile=-/etc/loja-segura/runtime.env
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning scripts/scheduler.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
